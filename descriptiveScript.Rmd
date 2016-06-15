@@ -1,0 +1,21 @@
+---
+title: "descriptiveScript"
+author: "eb.navarro"
+date: "June 15, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# DESCRIPTIVE SCRIPT
+## Introduction
+
+```{r loadData}
+source("R/loadData.R")
+fullData <- loadCleanData()
+str(fullData)
+summary(fullData)
+```
+
