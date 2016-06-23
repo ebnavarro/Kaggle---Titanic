@@ -9,13 +9,121 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-# DESCRIPTIVE SCRIPT
+# DESCRIPTIVE ANALYSIS
+
 ## Introduction
+
+This Markdown Script is intended to show a descriptive analysis of the Titanic's challenge data.
+Many functions in it (loadCleanData, plot.hist.density, ...) have been included in the git repository ([loadData.R](https://github.com/ebnavarro/Kaggle-Titanic/blob/master/R/loadData.R)).
+
+### Loading the data
+
+First of all, we load the data as it is in the R console. This process has been included in a function () to future ussage.
+
+The object "fullData" includes train and test sets distinguished by the column named "SampleOrigin".
 
 ```{r loadData}
 source("R/loadData.R")
 fullData <- loadCleanData()
 str(fullData)
 summary(fullData)
+```
+
+This shows that there are a total of 1309 observations (TRAIN: 891, TEST: 418) and 12 variables (+ additionally created "SampleOrigin"). The variables are quantitative and qualitative, also some of them has unkonw values in the observations, i.e. "Survived" (resolve them is the finality of the challenge), "Age", "Fare", "Embarked".
+
+### Descriptive plots. Quatitative data
+
+Although only the variable Age looks like following a normal distribution, ploting the histogram and desnsity plots of SibSp, Parch and Fare variables we can see that also follow a normal distribution for positive values. 
+```{r quantDataA}
+par(mfrow=c(3, 4))
+x.age <- fullData[!is.na(fullData$Age),]$Age
+x.sibsp <- fullData[!is.na(fullData$SibSp),]$SibSp
+x.parch <- fullData[!is.na(fullData$Parch),]$Parch
+x.fare <- fullData[!is.na(fullData$Fare),]$Fare
+
+boxplot(x.age, main="Age")
+boxplot(x.sibsp, main="Siblings/Spouses")
+boxplot(x.parch, main="Parents/Childrens")
+boxplot(x.fare, main="Fare")
+
+normal.charts(x.age, "Hist Age variable", "Age", FALSE)
+normal.charts(x.sibsp, "Hist SibSp variable", "Siblings/Spouses Aboard", FALSE)
+normal.charts(x.parch, "Hist Parch variable", "Parents/Children Aboard", FALSE)
+normal.charts(x.fare, "Hist Fare variable", "Fare paid", FALSE)
+
+qqnorm(x.age)
+qqline(x.age)
+qqnorm(x.sibsp)
+qqline(x.sibsp)
+qqnorm(x.parch)
+qqline(x.parch)
+qqnorm(x.fare)
+qqline(x.fare)
+title("Normal distributions", outer = TRUE)
+
+```
+We can observe that all of these variables distributions contain many outliers which may be treated in future sections.
+
+Additionally SibSp and Parch may be considered "count data" which usually follow a Poisson distribution.
+
+```{r quantDataB}
+par(mfrow=c(1, 2))
+poisson.charts(x.parch, "Hist Parch variable", "Parents/Children Aboard")
+poisson.charts(x.sibsp, "Hist SibSp variable", "Siblings/Spouses Aboard")
+title("Poisson distributions", outer = TRUE)
+```
+
+
+
+### Descriptive plots. Qualitative data
+Bar and pie plots to visualize the qualitative data. Variables: "Pclass", "Sex", "Embarked" and "Survived".
+```{r qualiDataA}
+
+x.pclass <- fullData[!is.na(fullData$Pclass),]$Pclass
+x.sex <- fullData[!is.na(fullData$Sex),]$Sex
+x.embarked <- fullData[!is.na(fullData$Embarked),]$Embarked
+x.survived <- fullData[!is.na(fullData$Survived),]$Survived
+
+par(mfrow=c(2, 4))
+plot(x.pclass, main="Trip classes")
+plot(x.sex, main="Sex")
+plot(x.embarked, main="Embarked on")
+plot(x.survived, main="Survived")
+title("Known qualitative data", outer = TRUE)
+
+x.pclass.table <- table(x.pclass)
+x.sex.table <- table(x.sex)
+x.embarked.table <- table(x.embarked)
+x.survived.table <- table(x.survived)
+
+prop.table(x.pclass.table)
+prop.table(x.sex.table)
+prop.table(x.embarked.table)
+prop.table(x.survived.table)
+
+pie(x.pclass.table)
+pie(x.sex.table)
+pie(x.embarked.table)
+pie(x.survived.table)
+
+```
+
+Finally, a contingency table is created to visualize the "Survived" variable against the other factors. A barplot is also created to show the frequency of the different factor aggregations.
+```{r qualiDataB}
+
+par(mfrow=c(1, 1))
+quali.xtabs <- xtabs(~Pclass+Sex+Embarked+Survived, data=fullData)
+quali.xtabs.ftable <- ftable(quali.xtabs)
+quali.xtabs.proptable <- prop.table(quali.xtabs.ftable)
+barplot(prop.table(quali.xtabs.proptable),
+        main = "Frequencies of survivors in function of other factors. ",
+        ylab ="Frequencies of survivors",
+        names.arg = c("Not survived","Survived"),
+        beside = TRUE
+        )
+
+quali.xtabs.ftable
+as.data.frame(quali.xtabs.ftable)
+
 ```
 
