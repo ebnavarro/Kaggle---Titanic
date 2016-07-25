@@ -1,0 +1,234 @@
+---
+title: "primaryModel"
+author: "eb.navarro"
+date: "June 27, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# PRIMARY MODEL
+
+## Introduction
+This markdown notebook has been created to build a primary model created with decision tree and a random forest with cross validation. It is quite similar as done in Datacamp, but with slight exploratory additions.
+
+### Loading the data
+First of all, we load the data with my own function "loadCleanData".
+
+The object "fullData" includes train and test sets distinguished by the column named "SampleOrigin".
+
+*NOTE:* This process and others have been included in different functions for future usage.
+
+```{r loadData}
+loadCleanData <- function(){
+
+  # READ DATA
+  trainPath = "data/train.csv" 
+  testPath = "data/test.csv" 
+  train <- read.csv(trainPath, header = TRUE, sep = ",", stringsAsFactors = FALSE)
+  test <- read.csv(testPath, header = TRUE, sep = ",", stringsAsFactors = FALSE)
+  
+  # Joining datasets to analyse better the whole data
+  train$SampleOrigin <- 'TRAIN'
+  test$SampleOrigin <- 'TEST'
+  test$Survived <- NA
+  
+  fullData <- rbind(train, test)
+  # anyDuplicated(fullData$PassengerId) # As it is 0, we can consider this field as 
+  
+  # Prepare data by type
+  fullData$SampleOrigin = factor(fullData$SampleOrigin)
+  fullData$Survived <- factor(fullData$Survived)
+  fullData$Pclass <- factor(fullData$Pclass)
+  fullData$Sex <- factor(fullData$Sex)
+  fullData$Embarked <- factor(fullData$Embarked)
+
+  return(fullData)
+}
+
+fullData <- loadCleanData()
+str(fullData)
+summary(fullData)
+```
+
+As we could see in these descriptive analyses, there are observations with unknown values for several variables. First of all we should to solve it.
+
+## Handling with missings
+
+The first missing to be fullfiled is one corresponding to "Fare" variable. As it is really simple we just set its value to the mean of the all other values of this variable.
+Additionally, the variable "Embarked" contain 2 observations with unknown values, but we can see the "Fare" of these observations. As the value is really high (80 pounds per ticket), the embarkation with this fare is likely to be "C", as others ("Q" and "S") are lower.
+
+``` {r missings}
+missings.fare <- which(is.na(fullData$Fare)) # returns 1044
+fullData[missings.fare,]$Fare <- mean(fullData$Fare[!is.na(fullData$Fare)])
+
+missings.embarked <- which(fullData$Embarked == "")
+missings.embarked.boxplot <- boxplot(Fare~Embarked, data=fullData)
+# Five numbers of "Fare" for each "Embarked" factor.
+missings.embarked.boxplot$stats
+fullData[which(fullData$Embarked==""),]$Embarked <- 'C'
+fullData$Embarked <- factor(fullData$Embarked)
+levels(fullData$Embarked)
+```
+
+To fix the "Age" missings is a bit triky. It does not seem to exist any variable which can be useful to impute this data missing, so we will do it using a prediction with regression tree.
+```{r}
+age_imputation <- function() {
+  # Computes the age imputation for missing values.
+  require(rpart)
+  fit <- rpart(formula = Age ~ Pclass + Sex + SibSp + Parch + Fare, data = fullData[!is.na(fullData$Age),])
+  
+  prediction.age <- predict(fit, fullData[is.na(fullData$Age),])
+  data.frame.age.actual <- data.frame(PassengerId = fullData$PassengerId, Age = fullData$Age)
+  data.frame.age.predicted <- data.frame(PassengerId = fullData[is.na(fullData$Age),]$PassengerId, Age = round(prediction.age))
+  
+  data.frame.age <- merge(data.frame.age.actual, data.frame.age.predicted, by = c("PassengerId", "Age"), all = TRUE)
+  
+  return(data.frame.age[!is.na(data.frame.age$Age),])
+}
+```
+
+Once created the "age_imputation" function, we use it to include the imputations to the fullData variable.
+``` {r message=FALSE}
+actual.predicted.age <- age_imputation()
+missing.age.PassIds = fullData[which(is.na(fullData$Age)),]$PassengerId
+fullData[fullData$PassengerId %in% missing.age.PassIds,]$Age <- actual.predicted.age[actual.predicted.age$PassengerId %in% missing.age.PassIds,]$Age
+
+```
+
+# Primary Model
+Once we have all the missings imputed, the next step is to create a simple model and try to do a cross validation with known data ('Survived' attribute).
+
+## Include additional variables
+Increasing the dataset with simple modifications from the original data:
+1) *Family_size*: grouping (adding) the number of relatives related with each sample.
+2) *Title*: extraction of the personal title usually included with the its name.
+
+First the creation of specific function to create these new variables:
+```{r familyTotalCount}
+family_total_count <- function() {
+  # Family total count
+  data.frame.family_size <- data.frame(PassengerId = fullData$PassengerId, Family_size = fullData$SibSp + fullData$Parch + 1)
+  return(data.frame.family_size)
+}
+```
+
+```{r titleExtraction}
+title_extraction <- function() {
+  # Title extraction
+  # Grab title from passenger names. Inspired from Megan L. Risdal idea.
+  fullData$Title <- as.factor(gsub('(.*, )|(\\..*)', '', fullData$Name))
+  mainTitleRows <- which((fullData$Title %in% c('Mr', 'Miss', 'Master', 'Mrs')) == TRUE)
+  otherTitleRows <- which((fullData$Title %in% c('Mr', 'Miss', 'Master', 'Mrs')) == FALSE)
+  levels(fullData$Title) <- c(levels(fullData$Title), "Other")
+  fullData[otherTitleRows,]$Title <- 'Other'
+  fullData$Title <- droplevels(fullData$Title)
+  data.frame.title <- data.frame(PassengerId = fullData$PassengerId, Title = fullData$Title)
+  
+  return(data.frame.title)
+}
+```
+Merging the new variables by the "PassengerId".
+```{r includeVariables}
+actual.predicted.family_size <- family_total_count()
+actual.predicted.title <- title_extraction()
+fullData <- merge(fullData, actual.predicted.title, by = "PassengerId")
+fullData <- merge(fullData, actual.predicted.family_size, by = "PassengerId")
+```
+
+## Cross validation settings
+Separation of known "survived" attribute in the training dataset to create 70% as "train" set and 30% as "cross" validation subset. The "test" set is the already unknown "survived" values. 
+```{r crossValidationSettings,  message=FALSE}
+require(caret)
+train <- fullData[fullData$SampleOrigin=='TRAIN',]
+sampleNumbers = dim(train)
+folds = createDataPartition(train$PassengerId, p=0.7, list = FALSE, times = 1)
+
+trainSamples <- train[folds,] 
+crossSamples <- train[-folds,] 
+test <- fullData[fullData$SampleOrigin=='TEST',]
+```
+
+## Model creation
+First model with regresion tree. Once the main variables are detected, we prune the trained tree to generalize predictions.
+```{r primaryModel,  message=FALSE}
+require(rpart)
+require(rpart.plot)
+fit <- rpart(Survived ~ Pclass + Sex + Age + Fare + SibSp + Parch + Embarked  + Title + Family_size, data = trainSamples, method = "class")
+
+# Some charts (tree chart and CP's)
+par(mfrow=c(1, 2))
+plot(fit, uniform=TRUE,main="Regression Tree for Survived")
+text(fit, use.n=TRUE, all=TRUE, pretty = 0)
+
+rpart.plot(fit, uniform=TRUE,main="Regression Tree for Survived")
+
+printcp(fit) # display the results
+plotcp(fit) # visualize cross-validation results
+fit$variable.importance
+
+# Pruning on CP=0.025
+fit.pruned <- prune(fit, cp=0.025)
+plotcp(fit.pruned)
+rpart.plot(fit, main="Regression Tree for Survived")
+rpart.plot(fit.pruned, main="Regression (pruned) Tree for Survived")
+fit.pruned$variable.importance
+```
+
+## Apply the model to crossSamples
+Apply models to the cross validation set and calculate the confusion matrix and missclassification (pruned tree model).
+
+Evalution (confusion matrix and missclassification) of the non-pruned model:
+```{r modelApplyCrossValidation}
+my_prediction <- predict(fit, crossSamples, type="class")
+prop.table(table(crossSamples$Survived, my_prediction))
+# misclassification (% of improper classifications)
+mean(my_prediction != crossSamples$Survived)
+```
+
+Evalution (confusion matrix and missclassification) of the pruned model:
+```{r}
+my_prediction_p <- predict(fit.pruned, crossSamples, type="class")
+prop.table(table(crossSamples$Survived, my_prediction_p))
+# misclassification (% of improper classifications)
+mean(my_prediction_p != crossSamples$Survived)
+```
+Pruning improves the model as it overcome overfitting produced by complex or too much detailed decision trees.
+
+## Random forest
+Now, we create a random forest to avoid local minimums, which probably improve the results reducing the missclassification.
+```{r randomForestModel, message=FALSE}
+require(randomForest)
+fit.forest <- randomForest(Survived ~ Title + Fare + Sex + Age + Pclass + Family_size + SibSp + Embarked + Parch, data = trainSamples)
+imp = importance(fit.forest, type=2)
+imp[order(imp, decreasing = TRUE),] # Sort fetures by importance.
+par(mfrow=c(1, 2))
+plot(fit.forest)
+plot(imp[order(imp, decreasing = TRUE),])
+
+my_prediction_forest <- predict(fit.forest, crossSamples, type="class")
+table(crossSamples$Survived, my_prediction_forest)
+prop.table(table(crossSamples$Survived, my_prediction_forest))
+mean(my_prediction_forest != crossSamples$Survived) # missclassification
+```
+
+## Misclassification explanations
+I think I found an algorithm (random forest) which can be applied with great results to new data sets for survival prediction purposes. Anyway, lets to examine the misclassification rates in function of the different variables used to train this model.
+```{r}
+misClass <- crossSamples[my_prediction_forest != crossSamples$Survived,]
+welClass <- crossSamples[my_prediction_forest == crossSamples$Survived,]
+
+# Plotting subject's variables with misclassified results.
+par(mfrow=c(2, 3))
+plot(Survived ~ Title + Fare + Sex + Age + Pclass + Family_size, data=misClass)
+title("'Survived' misclassified", outer=TRUE, line = -2)
+
+# Plotting subject's variables with good classification results.
+par(mfrow=c(2, 3))
+plot(Survived ~ Title + Fare + Sex + Age + Pclass + Family_size, data=welClass)
+title("'Survived' properly classified", outer=TRUE, line = -2)
+```
+
+Looking to the charts 'Title' and 'Sex' of both sets (bad and properly classified), different observations can be described. A different rate of survivals in (mis)classification groups can drives to think that certain variables can be treated differently, for example by value balancing or other techniques. For example, subjects with values 'Mr' and 'Miss' in the 'Title' variable show oposite classification rates. It also happens with values 'Female' and 'Male' from the 'Sex' variable. 
