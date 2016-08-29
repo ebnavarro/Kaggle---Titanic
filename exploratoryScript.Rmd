@@ -1,0 +1,75 @@
+---
+title: "exploratoryScript"
+author: "eb.navarro"
+date: "June 27, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# EXPLORATORY ANALYSIS
+
+## Loading data
+```{r loadData}
+source("R/loadData.R")
+fullData <- loadCleanData()
+str(fullData)
+summary(fullData)
+```
+
+## Basic imputation of data
+```{r basicImputation}
+missings.fare <- which(is.na(fullData$Fare)) # returns 1044
+fullData[missings.fare,]$Fare <- mean(fullData$Fare[!is.na(fullData$Fare)])
+
+missings.embarked <- which(fullData$Embarked == "")
+missings.embarked.boxplot <- boxplot(Fare~Embarked, data=fullData)
+missings.embarked.boxplot$stats
+fullData[which(fullData$Embarked==""),]$Embarked <- 'C'
+fullData$Embarked <- factor(fullData$Embarked)
+
+```
+
+## Age imputation
+```{r ageImputationA}
+library(rpart)
+fit <- rpart(formula = Age ~ Pclass + Sex + SibSp + Parch + Fare, data = fullData[!is.na(fullData$Age),])
+
+par(mfrow=c(1, 2))
+
+plot(fit, uniform=TRUE, main="Regression Tree for Age")
+text(fit, use.n=TRUE, all=TRUE, cex=.8)
+
+printcp(fit) # display the results
+plotcp(fit) # visualize cross-validation results
+
+prediction.age <- predict(fit, fullData[is.na(fullData$Age),])
+data.frame.age.actual <- data.frame(PassengerId = fullData$PassengerId, Age = fullData$Age)
+data.frame.age.predicted <- data.frame(PassengerId = fullData[is.na(fullData$Age),]$PassengerId, Age = round(prediction.age))
+
+data.frame.age <- merge(data.frame.age.actual, data.frame.age.predicted, by = c("PassengerId", "Age"), all = TRUE)
+
+saveRDS(data.frame.age[!is.na(data.frame.age$Age),], "output/actual.predicted.age.RData")
+```
+
+## Family total count
+```{r familyTotalCount}
+data.frame.family_size <- data.frame(PassengerId = fullData$PassengerId, Family_size = fullData$SibSp + fullData$Parch + 1)
+saveRDS(data.frame.family_size, "output/actual.predicted.family_size.RData")
+```
+
+## Title extraction
+```{r titleExtraction}
+# Grab title from passenger names. Inspired from Megan L. Risdal idea.
+fullData$Title <- as.factor(gsub('(.*, )|(\\..*)', '', fullData$Name))
+mainTitleRows <- which((fullData$Title %in% c('Mr', 'Miss', 'Master', 'Mrs')) == TRUE)
+otherTitleRows <- which((fullData$Title %in% c('Mr', 'Miss', 'Master', 'Mrs')) == FALSE)
+levels(fullData$Title) <- c(levels(fullData$Title), "Other")
+fullData[otherTitleRows,]$Title <- 'Other'
+fullData$Title <- droplevels(fullData$Title)
+data.frame.title <- data.frame(PassengerId = fullData$PassengerId, Title = fullData$Title)
+saveRDS(data.frame.title, "output/actual.predicted.title.RData")
+
+```
